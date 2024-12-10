@@ -37,16 +37,19 @@ jobs:
                 data=$(base64 -w 0 "$file")
                 checksum=$(sha256sum "$file" | cut -d ' ' -f 1)
                 timestamp=$(git log -1 --format=%ai -- "$file" | cut -d ' ' -f 1,2 | tr ' ' 'T')Z
+                contributors=$(git log -1 --format='%an <%ae>' -- "$file")
 
                 jq --arg name "$setting_id" \
                    --arg data "$data" \
                    --arg checksum "$checksum" \
                    --arg timestamp "$timestamp" \
+                   --arg contributors "$contributors" \
                    '. += [{
                      "name": $name,
                      "data": $data,
                      "checksum": $checksum,
-                     "timestamp": $timestamp
+                     "timestamp": $timestamp,
+                     "contributors": $contributors
                    }]' "${safe_branch_name}-settings.json" > temp.json && mv temp.json "${safe_branch_name}-settings.json"
               fi
             done
@@ -59,12 +62,22 @@ jobs:
 
             if [ -s "$settings_file" ]; then
               echo "Uploading settings for branch: $branch"
-              curl -f -X POST \
+              response=$(curl -s -w "%{http_code}" -o /tmp/curl_output \
+                -X POST \
                 -H "Authorization: $AUTHORIZATION" \
                 -H "Content-Type: application/json" \
                 -d @"$settings_file" \
-                "https://api-testing.liquidbounce.net/api/v1/client/$branch/settings/sync"
-              echo "Settings successfully uploaded for branch: $branch"
+                "https://api-testing.liquidbounce.net/api/v1/client/$branch/settings/sync")
+
+              if [ "$response" -ne 200 ]; then
+                echo "Failed to upload settings for branch: $branch"
+                echo "HTTP Status Code: $response"
+                echo "Response Body:"
+                cat /tmp/curl_output
+                exit 1
+              else
+                echo "Settings successfully uploaded for branch: $branch"
+              fi
             else
               echo "No settings to upload for branch: $branch"
             fi
