@@ -3,7 +3,7 @@ name: Sync settings
 on:
   push:
     branches:
-      - '**'
+      - '**' # Match all branches including those with slashes
 
 jobs:
   upload_settings:
@@ -13,7 +13,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Fetch all history for all tags and branches
 
       - name: Install jq
         run: sudo apt-get install -y jq
