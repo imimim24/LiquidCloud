@@ -3,7 +3,7 @@ name: Sync settings
 on:
   push:
     branches:
-      - '**' # Match all branches including those with slashes
+      - '**'
 
 jobs:
   upload_settings:
@@ -13,7 +13,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0 # Fetch all history for all tags and branches
+          fetch-depth: 0
 
       - name: Install jq
         run: sudo apt-get install -y jq
@@ -23,30 +23,21 @@ jobs:
         env:
           AUTHORIZATION: ${{ secrets.AUTHORIZATION }}
         run: |
-          set -e  # Exit immediately on error
+          set -e
 
           process_directory() {
             local branch="$1"
-            local safe_branch_name=$(echo "$branch" | tr '/' '-')  # Convert slashes to hyphens for filenames
+            local safe_branch_name=$(echo "$branch" | tr '/' '-')
             echo "Processing settings for branch: $branch"
-
-            # Initialize an empty JSON array for branch settings
             echo "[]" > "${safe_branch_name}-settings.json"
 
             for file in "LiquidBounce/settings/$branch"/*; do
               if [ -f "$file" ]; then
                 setting_id=$(basename "$file" | cut -f 1 -d '.')
-
-                # Encode file data to base64
                 data=$(base64 -w 0 "$file")
-
-                # Calculate checksum
                 checksum=$(sha256sum "$file" | cut -d ' ' -f 1)
-
-                # Get the last modification timestamp
                 timestamp=$(git log -1 --format=%ai -- "$file" | cut -d ' ' -f 1,2 | tr ' ' 'T')Z
 
-                # Create JSON object and append to the settings file
                 jq --arg name "$setting_id" \
                    --arg data "$data" \
                    --arg checksum "$checksum" \
@@ -72,15 +63,13 @@ jobs:
                 -H "Authorization: $AUTHORIZATION" \
                 -H "Content-Type: application/json" \
                 -d @"$settings_file" \
-                "https://api.liquidbounce.net/api/v1/client/$branch/settings/sync"
-
+                "https://api-testing.liquidbounce.net/api/v1/client/$branch/settings/sync"
               echo "Settings successfully uploaded for branch: $branch"
             else
               echo "No settings to upload for branch: $branch"
             fi
           }
 
-          # Find and process all branches
           find "LiquidBounce/settings" -mindepth 1 -maxdepth 1 -type d | while read -r dir; do
             branch=$(basename "$dir")
             process_directory "$branch"
@@ -91,4 +80,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: settings-payloads
-          path: '*-settings.json' # Upload all JSON files for all branches
+          path: '*-settings.json'
