@@ -59,7 +59,7 @@ jobs:
             local branch="$1"
             local safe_branch_name=$(echo "$branch" | tr '/' '-')
             settings_file="${safe_branch_name}-settings.json"
-
+          
             if [ -s "$settings_file" ]; then
               echo "Uploading settings for branch: $branch"
               response=$(curl -s -w "%{http_code}" -o /tmp/curl_output \
@@ -68,15 +68,15 @@ jobs:
                 -H "Content-Type: application/json" \
                 -d @"$settings_file" \
                 "https://api-testing.liquidbounce.net/api/v1/client/$branch/settings/sync")
-
-              if [ "$response" -ne 200 ]; then
+          
+              if [ "$response" -eq 200 ] || [ "$response" -eq 204 ]; then
+                echo "Settings successfully uploaded for branch: $branch"
+              else
                 echo "Failed to upload settings for branch: $branch"
                 echo "HTTP Status Code: $response"
                 echo "Response Body:"
                 cat /tmp/curl_output
                 exit 1
-              else
-                echo "Settings successfully uploaded for branch: $branch"
               fi
             else
               echo "No settings to upload for branch: $branch"
