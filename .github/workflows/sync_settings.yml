@@ -64,7 +64,7 @@ jobs:
                 -H "Authorization: $AUTHORIZATION" \
                 -H "Content-Type: application/json" \
                 -d @"$branch-settings.json" \
-                "https://api.liquidbounce.net/api/v1/client/$branch/settings/sync"
+                "https://api-testing.liquidbounce.net/api/v1/client/$branch/settings/sync"
                 
               # Print the total number of settings processed
               echo "Total settings processed for $branch: $(jq length "$branch-settings.json")"
