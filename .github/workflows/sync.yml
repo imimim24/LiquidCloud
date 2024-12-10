@@ -15,8 +15,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install jq
-        run: sudo apt-get install -y jq
+      - name: Install required tools
+        run: sudo apt-get install -y coreutils
 
       - name: Process and Upload Settings
         id: process_and_upload
@@ -29,38 +29,34 @@ jobs:
             local branch="$1"
             local safe_branch_name=$(echo "$branch" | tr '/' '-')
             echo "Processing settings for branch: $branch"
-            echo "[]" > "${safe_branch_name}-settings.json"
+
+            local json_start='['
+            local json_end=']'
+            local json_entries=""
 
             for file in "LiquidBounce/settings/$branch"/*; do
               if [ -f "$file" ]; then
-                setting_id=$(basename "$file" | cut -f 1 -d '.')
-                data=$(base64 -w 0 "$file")
-                checksum=$(sha256sum "$file" | cut -d ' ' -f 1)
-                timestamp=$(git log -1 --format=%ai -- "$file" | cut -d ' ' -f 1,2 | tr ' ' 'T')Z
-                contributors=$(git log -1 --format='%an <%ae>' -- "$file")
+                local setting_id=$(basename "$file" | cut -f 1 -d '.')
+                local data=$(base64 -w 0 "$file")
+                local checksum=$(sha256sum "$file" | cut -d ' ' -f 1)
+                local timestamp=$(git log -1 --format=%ai -- "$file" | cut -d ' ' -f 1,2 | tr ' ' 'T')Z
+                local contributors=$(git log -1 --format='%an <%ae>' -- "$file")
 
-                tmp_file=$(mktemp)
-                jq --arg name "$setting_id" \
-                   --arg data "$data" \
-                   --arg checksum "$checksum" \
-                   --arg timestamp "$timestamp" \
-                   --arg contributors "$contributors" \
-                   '. += [{
-                     "name": $name,
-                     "data": $data,
-                     "checksum": $checksum,
-                     "timestamp": $timestamp,
-                     "contributors": $contributors
-                   }]' "${safe_branch_name}-settings.json" > "$tmp_file" && mv "$tmp_file" "${safe_branch_name}-settings.json"
+                # Append JSON entry
+                json_entries="${json_entries}{\"name\":\"${setting_id}\",\"data\":\"${data}\",\"checksum\":\"${checksum}\",\"timestamp\":\"${timestamp}\",\"contributors\":\"${contributors}\"},"
               fi
             done
+
+            # Remove trailing comma and wrap with brackets
+            json_payload="${json_start}${json_entries%,}${json_end}"
+            echo "$json_payload" > "${safe_branch_name}-settings.json"
           }
 
           upload_settings() {
             local branch="$1"
-            local safe_branch_name=$(echo "$branch" | tr '/' '-')
+            local safe_branch_name=$(echo "$branch" | tr '/' '-') 
             settings_file="${safe_branch_name}-settings.json"
-          
+
             if [ -s "$settings_file" ]; then
               echo "Uploading settings for branch: $branch"
               curl --fail -X POST \
