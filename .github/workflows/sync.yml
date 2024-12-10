@@ -27,11 +27,12 @@ jobs:
         run: |
           set -e
 
+          # Initialize an empty array for the settings
+          all_settings="[]"
+
           process_directory() {
             local branch="$1"
-            local safe_branch_name=$(echo "$branch" | tr '/' '-')
             echo "Processing settings for branch: $branch"
-            echo "[]" > "${safe_branch_name}-settings.json"
 
             for file in "LiquidBounce/settings/$branch"/*; do
               if [ -f "$file" ]; then
@@ -41,50 +42,45 @@ jobs:
                 timestamp=$(git log -1 --format=%ai -- "$file" | cut -d ' ' -f 1,2 | tr ' ' 'T')Z
                 contributors=$(git log -1 --format='%an <%ae>' -- "$file")
 
-                tmp_file=$(mktemp)
-                jq --arg name "$setting_id" \
-                   --arg url "$raw_url" \
-                   --arg checksum "$checksum" \
-                   --arg timestamp "$timestamp" \
-                   --arg contributors "$contributors" \
-                   '. += [{
-                     "name": $name,
-                     "url": $url,
-                     "checksum": $checksum,
-                     "timestamp": $timestamp,
-                     "contributors": $contributors
-                   }]' "${safe_branch_name}-settings.json" > "$tmp_file" && mv "$tmp_file" "${safe_branch_name}-settings.json"
+                # Append the new setting to the all_settings array
+                all_settings=$(echo "$all_settings" | jq --arg name "$setting_id" \
+                                                          --arg branch "$branch" \
+                                                          --arg url "$raw_url" \
+                                                          --arg checksum "$checksum" \
+                                                          --arg timestamp "$timestamp" \
+                                                          --arg contributors "$contributors" \
+                                                          '. += [{
+                                                            "name": $name,
+                                                            "branch": $branch,
+                                                            "url": $url,
+                                                            "checksum": $checksum,
+                                                            "timestamp": $timestamp,
+                                                            "contributors": $contributors
+                                                          }]')
               fi
             done
           }
 
-          upload_settings() {
-            local branch="$1"
-            local safe_branch_name=$(echo "$branch" | tr '/' '-')
-            settings_file="${safe_branch_name}-settings.json"
-          
-            if [ -s "$settings_file" ]; then
-              echo "Uploading settings for branch: $branch"
-              curl --fail -X POST \
-                -H "Authorization: $AUTHORIZATION" \
-                -H "Content-Type: application/json" \
-                -d @"$settings_file" \
-                "https://api-testing.liquidbounce.net/api/v1/client/$branch/settings/sync" \
-                && echo "Settings successfully uploaded for branch: $branch" \
-                || (echo "Failed to upload settings for branch: $branch" && exit 1)
-            else
-              echo "No settings to upload for branch: $branch"
-            fi
-          }
-
-          find "LiquidBounce/settings" -mindepth 1 -maxdepth 1 -type d | while read -r dir; do
-            branch=$(basename "$dir")
+          # Process both branches in one go and add the settings to the combined array
+          for branch in legacy nextgen; do
             process_directory "$branch"
-            upload_settings "$branch"
           done
+
+          # Write the combined settings to a file
+          echo "$all_settings" > combined-settings.json
+
+          # Upload the combined settings for both branches
+          echo "Uploading combined settings"
+          curl --fail -X POST \
+            -H "Authorization: $AUTHORIZATION" \
+            -H "Content-Type: application/json" \
+            -d @"combined-settings.json" \
+            "https://api-testing.liquidbounce.net/api/v3/marketplace/sync" \
+            && echo "Combined settings successfully uploaded" \
+            || (echo "Failed to upload combined settings" && exit 1)
 
       - name: Upload JSON Files to Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: settings-payloads
-          path: '*-settings.json'
+          path: 'combined-settings.json'
