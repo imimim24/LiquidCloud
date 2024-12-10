@@ -15,48 +15,72 @@ jobs:
         with:
           fetch-depth: 0 # Fetch all history for all tags and branches
 
-      - name: Create TAR and Meta Files
-        id: create_tar
-        run: |
-          for branch_folder in LiquidBounce/settings/*; do
-            if [ -d "$branch_folder" ]; then
-              echo "Processing files in directory: $branch_folder"
-              branch_name=$(basename "$branch_folder")
-              # Create a TAR file with the settings content
-              tar -cvf "$branch_name.tar" -C "$branch_folder" .
-              for file in "$branch_folder"/*; do
-                if [ -f "$file" ]; then
-                  setting_id=$(basename "$file" | cut -f 1 -d '.')
-                  contributors=$(git log --follow --format="%aN" -- "$file" | sort | uniq | paste -sd "," -)
-                  meta_file="$setting_id.meta"
-                  modify_date=$(git log -1 --format=%ai -- "$file" | cut -d ' ' -f 1,2 | tr ' ' 'T')Z
-                  echo "{\"setting_id\":\"$setting_id\",\"contributors\":\"$contributors\",\"timestamp\":\"$modify_date\"}" > "$meta_file"
-                  # Append the .meta file to the TAR archive if it exists
-                  if [ -f "$meta_file" ]; then
-                    tar -rvf "$branch_name.tar" "$meta_file"
-                    # Clean up the .meta file after adding it to the archive
-                    rm "$meta_file"
-                  fi
-                fi
-              done
-            fi
-          done
+      - name: Install jq
+        run: sudo apt-get install -y jq
 
-      - name: Upload TAR and Meta Files
-        id: upload_files
+      - name: Process and Upload Settings
+        id: process_and_upload
         env:
           AUTHORIZATION: ${{ secrets.AUTHORIZATION }}
         run: |
-          for branch_folder in LiquidBounce/settings/*; do
-            if [ -d "$branch_folder" ]; then
-              branch_name=$(basename "$branch_folder")
-              echo "Uploading tar file: $branch_name.tar"
-              curl -X POST -H "Authorization: $AUTHORIZATION" -F "settings_bundle=@$branch_name.tar" "https://api.liquidbounce.net/api/v1/client/$branch_name/settings/upload/bundle"
+          process_directory() {
+            local branch=$1
+            echo "Processing $branch settings..."
+            
+            # Create empty array for configs
+            echo "[]" > "$branch-settings.json"
+            
+            for file in "LiquidBounce/settings/$branch"/*; do
+              if [ -f "$file" ]; then
+                setting_id=$(basename "$file" | cut -f 1 -d '.')
+                
+                # Get file data in base64
+                data=$(base64 -w 0 "$file")
+                
+                # Calculate checksum
+                checksum=$(sha256sum "$file" | cut -d ' ' -f 1)
+                
+                # Get timestamp
+                timestamp=$(git log -1 --format=%ai -- "$file" | cut -d ' ' -f 1,2 | tr ' ' 'T')Z
+                
+                # Create JSON object and append to array using jq
+                jq --arg name "$setting_id" \
+                   --arg data "$data" \
+                   --arg checksum "$checksum" \
+                   --arg timestamp "$timestamp" \
+                   '. += [{
+                     "name": $name,
+                     "data": $data,
+                     "checksum": $checksum,
+                     "timestamp": $timestamp
+                   }]' "$branch-settings.json" > temp.json && mv temp.json "$branch-settings.json"
+              fi
+            done
+            
+            if [ -s "$branch-settings.json" ]; then
+              # Upload to API
+              echo "Uploading $branch settings..."
+              curl -X POST \
+                -H "Authorization: $AUTHORIZATION" \
+                -H "Content-Type: application/json" \
+                -d @"$branch-settings.json" \
+                "https://api.liquidbounce.net/api/v1/client/$branch/settings/sync"
+                
+              # Print the total number of settings processed
+              echo "Total settings processed for $branch: $(jq length "$branch-settings.json")"
+            else
+              echo "No settings found for $branch"
             fi
-          done
-        
-      - name: Upload TAR Files to Artifacts
+          }
+          
+          # Process both nextgen and legacy in one go
+          process_directory "nextgen"
+          process_directory "legacy"
+
+      - name: Upload JSON Files to Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tar-artifacts
-          path: ./*.tar
+          name: settings-payloads
+          path: |
+            nextgen-settings.json
+            legacy-settings.json
